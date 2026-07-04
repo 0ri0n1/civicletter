@@ -1,8 +1,11 @@
 # Civic Letter
 
+**Live site: https://0ri0n1.github.io/civicletter/**
+
 Find your Canadian elected representatives at every level of government by
 postal code and send them a clear, professional letter in minutes.
-Bilingual (English / French).
+Bilingual (English / French). Free to use, no account, no tracking — and AI
+drafting, when used, runs privately on your own device.
 
 ## How it works
 
@@ -41,7 +44,17 @@ memory; after that, drafts take a few seconds.
 
 If no local model is running, drafting falls back to the Anthropic API when
 `VITE_ANTHROPIC_API_KEY` is set (see `.env.example`), and the fill-in template
-mode always works with no AI at all.
+mode always works with no AI at all. Visitors without either simply get the
+template mode selected automatically.
+
+**Using local AI on the hosted site:** Ollama only accepts requests from
+`localhost` pages by default. To let the live site use your local model, allow
+its origin and restart Ollama:
+
+```powershell
+[Environment]::SetEnvironmentVariable("OLLAMA_ORIGINS", "https://0ri0n1.github.io", "User")
+# then restart the Ollama service/app
+```
 
 > **Security note:** an Anthropic key in `.env.local` is bundled into the
 > client-side JavaScript. That is fine for personal/local use, but never ship
