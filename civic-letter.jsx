@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { MapPin, Loader2, Mail, Copy, Check, PenLine, Sparkles, FileText, ExternalLink, ChevronLeft } from "lucide-react";
+import { MapPin, LocateFixed, Loader2, Mail, Copy, Check, PenLine, Sparkles, FileText, ExternalLink, ChevronLeft } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 /* Civic Letter — find your Canadian representatives at every level    */
@@ -30,6 +30,7 @@ const LEVEL_LABELS = {
     Regional: { en: "Regional", fr: "Régional" },
     Provincial: { en: "Provincial", fr: "Provincial" },
     Federal: { en: "Federal", fr: "Fédéral" },
+    All: { en: "All levels", fr: "Tous les paliers" },
 };
 
 const STR = {
@@ -40,12 +41,21 @@ const STR = {
         postalPlaceholder: "Postal code (K1A 0A9)",
         lookup: "Look up",
         looking: "Looking up…",
+        useLocation: "Use my location",
+        locating: "Locating…",
+        geoDenied: "Location permission was denied — enter your postal code instead.",
+        geoUnavailable: "Your location couldn't be determined. Enter your postal code instead.",
         searchingDirectories: "Searching official directories… this can take up to a minute.",
         invalidPostal: "Enter a valid Canadian postal code, like K1A 0A9.",
         notFound: "That postal code wasn't found. Double-check it and try again.",
         lookupFailed: "The representative lookup didn't succeed. Double-check the postal code and try again in a moment.",
         noneFound: "No representatives were found for that postal code.",
         step2: "Choose who to write to",
+        writeAll: "Write to all {n} at once",
+        writeAllSub: "One letter, delivered to every level of government",
+        collectiveName: "All your elected representatives",
+        collectiveOffice: "Every level of government",
+        collectiveNoEmail: "No public email for: {names}. Copy the letter and also submit it through their contact pages.",
         noEmail: "No public email — letter can be copied instead",
         step3: "Describe your concern",
         aiMode: "AI-drafted letter",
@@ -93,12 +103,21 @@ const STR = {
         postalPlaceholder: "Code postal (K1A 0A9)",
         lookup: "Rechercher",
         looking: "Recherche…",
+        useLocation: "Utiliser ma position",
+        locating: "Localisation…",
+        geoDenied: "L'accès à votre position a été refusé — entrez plutôt votre code postal.",
+        geoUnavailable: "Impossible de déterminer votre position. Entrez plutôt votre code postal.",
         searchingDirectories: "Consultation des répertoires officiels… cela peut prendre jusqu'à une minute.",
         invalidPostal: "Entrez un code postal canadien valide, par exemple K1A 0A9.",
         notFound: "Ce code postal est introuvable. Vérifiez-le et réessayez.",
         lookupFailed: "La recherche de représentants a échoué. Vérifiez le code postal et réessayez dans un instant.",
         noneFound: "Aucun représentant n'a été trouvé pour ce code postal.",
         step2: "Choisissez votre destinataire",
+        writeAll: "Écrire aux {n} d'un seul coup",
+        writeAllSub: "Une même lettre, livrée à tous les paliers de gouvernement",
+        collectiveName: "Tous vos représentants élus",
+        collectiveOffice: "Tous les paliers de gouvernement",
+        collectiveNoEmail: "Aucun courriel public pour : {names}. Copiez la lettre et soumettez-la aussi via leurs pages de contact.",
         noEmail: "Aucun courriel public — la lettre peut être copiée",
         step3: "Décrivez votre préoccupation",
         aiMode: "Lettre rédigée par IA",
@@ -206,6 +225,23 @@ function municipalFallbackRep(city, lang) {
         email: null,
         url: `https://www.google.com/search?q=${query}`,
         synthetic: true,
+    };
+}
+
+/* "Write to all at once": a collective recipient bundling every found
+   representative. mailto supports comma-separated recipients, so one click
+   opens a single email addressed to everyone with a public address. */
+function collectiveRep(grouped, strings) {
+    const all = LEVEL_ORDER.flatMap((l) => grouped[l] || []);
+    const emails = all.filter((r) => r.email).map((r) => r.email);
+    return {
+        name: strings.collectiveName,
+        elected_office: strings.collectiveOffice,
+        district_name: null,
+        party_name: null,
+        email: emails.join(","),
+        url: null,
+        collective: all,
     };
 }
 
@@ -338,6 +374,7 @@ Include only real, current officials you can verify. If the postal code is inval
 /* ----------------------------- letters ----------------------------- */
 
 function salutationEn(rep) {
+    if (rep.collective) return "Dear Elected Representatives";
     const last = (rep.name || "").trim().split(" ").slice(-1)[0];
     const office = (rep.elected_office || "").toLowerCase();
     if (office.includes("mayor")) return `Dear Mayor ${last}`;
@@ -345,26 +382,43 @@ function salutationEn(rep) {
     return `Dear ${rep.name}`;
 }
 
+/* Addressee block: one line for a single official, one line per official
+   for a collective letter. */
+function addresseeLines(rep) {
+    if (rep.collective) {
+        return rep.collective.map(
+            (r) => `${r.name}${r.elected_office ? ` — ${r.elected_office}` : ""}${r.district_name ? `, ${r.district_name}` : ""}`,
+        );
+    }
+    return [`${rep.name}`, `${rep.elected_office || ""}${rep.district_name ? ", " + rep.district_name : ""}`];
+}
+
 function buildTemplateLetter({ rep, level, issueLabel, description, userName, city, lang }) {
     const locale = lang === "fr" ? "fr-CA" : "en-CA";
     const today = new Date().toLocaleDateString(locale, { year: "numeric", month: "long", day: "numeric" });
     const s = STR[lang];
 
+    const collective = !!rep.collective;
     let lines;
     if (lang === "fr") {
+        const levelPhrase = collective
+            ? "à tous les paliers de gouvernement"
+            : `au palier ${LEVEL_LABELS[level].fr.toLowerCase()}`;
         lines = [
             today,
             "",
-            `À l'attention de ${rep.name}`,
-            `${rep.elected_office || ""}${rep.district_name ? ", " + rep.district_name : ""}`,
+            ...(collective ? ["À l'attention de :"] : ["À l'attention de " + rep.name]),
+            ...(collective ? addresseeLines(rep) : [`${rep.elected_office || ""}${rep.district_name ? ", " + rep.district_name : ""}`]),
             "",
             "Madame, Monsieur,",
             "",
-            `Je vous écris en tant que citoyen(ne)${rep.district_name ? ` de ${rep.district_name}` : ""} au sujet de l'enjeu suivant : ${issueLabel.toLowerCase()}.`,
+            collective
+                ? `Je vous écris, à chacun et chacune d'entre vous, en tant que citoyen(ne) au sujet de l'enjeu suivant : ${issueLabel.toLowerCase()}.`
+                : `Je vous écris en tant que citoyen(ne)${rep.district_name ? ` de ${rep.district_name}` : ""} au sujet de l'enjeu suivant : ${issueLabel.toLowerCase()}.`,
             "",
             description.trim(),
             "",
-            `En tant que contribuable, je souhaite que nos fonds publics soient utilisés efficacement, et je crois que cette question mérite votre attention au palier ${LEVEL_LABELS[level].fr.toLowerCase()}. Je vous serais reconnaissant(e) de m'indiquer les mesures que vous ou votre bureau comptez prendre à ce sujet.`,
+            `En tant que contribuable, je souhaite que nos fonds publics soient utilisés efficacement, et je crois que cette question mérite votre attention ${levelPhrase}. Je vous serais reconnaissant(e) de m'indiquer les mesures que vous ou votre bureau comptez prendre à ce sujet.`,
             "",
             "Je vous remercie de votre temps et de votre engagement envers notre communauté.",
             "",
@@ -374,19 +428,21 @@ function buildTemplateLetter({ rep, level, issueLabel, description, userName, ci
             city || "",
         ];
     } else {
+        const levelPhrase = collective ? "at every level of government" : `at the ${level.toLowerCase()} level`;
         lines = [
             today,
             "",
-            `${rep.name}`,
-            `${rep.elected_office || ""}${rep.district_name ? ", " + rep.district_name : ""}`,
+            ...addresseeLines(rep),
             "",
             `${salutationEn(rep)},`,
             "",
-            `I am writing to you as a constituent${rep.district_name ? ` of ${rep.district_name}` : ""} regarding ${issueLabel.toLowerCase()}.`,
+            collective
+                ? `I am writing to each of you, my elected representatives, regarding ${issueLabel.toLowerCase()} — an issue that crosses jurisdictions.`
+                : `I am writing to you as a constituent${rep.district_name ? ` of ${rep.district_name}` : ""} regarding ${issueLabel.toLowerCase()}.`,
             "",
             description.trim(),
             "",
-            `As a taxpayer, I want to see our public dollars used effectively, and I believe this issue deserves your attention at the ${level.toLowerCase()} level. I would appreciate a response outlining what action you or your office intend to take on this matter.`,
+            `As a taxpayer, I want to see our public dollars used effectively, and I believe this issue deserves your attention ${levelPhrase}. I would appreciate a response outlining what action you or your office intend to take on this matter.`,
             "",
             "Thank you for your time and your service to our community.",
             "",
@@ -406,10 +462,15 @@ async function draftWithAI({ rep, level, issueLabel, description, userName, lang
         lang === "fr"
             ? "Write the letter entirely in formal Canadian French, using the appropriate register and salutation conventions for correspondence with elected officials in Canada."
             : "Write the letter in English.";
-    const prompt = `You are drafting a formal letter from a constituent to a Canadian elected official.
+    const officialBlock = rep.collective
+        ? `Officials (this single letter is addressed to all of them together):\n${rep.collective
+              .map((r) => `- ${r.name}, ${r.elected_office || "elected official"}${r.district_name ? `, ${r.district_name}` : ""}`)
+              .join("\n")}`
+        : `Official: ${rep.name}, ${rep.elected_office || "elected official"}${rep.district_name ? `, ${rep.district_name}` : ""}`;
+    const prompt = `You are drafting a formal letter from a constituent to ${rep.collective ? "their Canadian elected officials at every level of government" : "a Canadian elected official"}.
 
-Official: ${rep.name}, ${rep.elected_office || "elected official"}${rep.district_name ? `, ${rep.district_name}` : ""}
-Government level: ${level}
+${officialBlock}
+Government level: ${level === "All" ? "All levels of government — address them collectively with a shared salutation" : level}
 ${rep.party_name ? `Party: ${rep.party_name}` : ""}
 Constituent name: ${userName || (lang === "fr" ? "Un(e) citoyen(ne) préoccupé(e)" : "A concerned constituent")}
 Issue category: ${issueLabel}
@@ -461,6 +522,7 @@ export default function CivicLetter() {
 
     const [postal, setPostal] = useState("");
     const [loading, setLoading] = useState(false);
+    const [locating, setLocating] = useState(false);
     const [slowLookup, setSlowLookup] = useState(false); // true while AI fallback runs
     const [error, setError] = useState("");
     const [grouped, setGrouped] = useState(null);
@@ -497,12 +559,33 @@ export default function CivicLetter() {
 
     const postalValid = /^[A-Za-z]\d[A-Za-z]\s?\d[A-Za-z]\d$/.test(postal.trim());
 
-    async function lookup() {
+    function resetLookupState() {
         setError("");
         setGrouped(null);
         setSelected(null);
         setLetter(null);
         setSlowLookup(false);
+    }
+
+    /* Shared tail of every lookup path: group, guarantee a municipal entry,
+       and publish the results. Returns false when nothing was found. */
+    function applyLookupResult(result) {
+        const byLevel = groupReps(result.reps || []);
+        if (Object.keys(byLevel).length === 0) {
+            setError(t.noneFound);
+            return false;
+        }
+        const city = titleCaseCity(result.city);
+        if (!byLevel.Municipal?.length) {
+            byLevel.Municipal = [municipalFallbackRep(city, lang)];
+        }
+        setCityHint(city);
+        setGrouped(byLevel);
+        return true;
+    }
+
+    async function lookup() {
+        resetLookupState();
         if (!postalValid) {
             setError(t.invalidPostal);
             return;
@@ -520,23 +603,51 @@ export default function CivicLetter() {
                 setSlowLookup(true);
                 result = await lookupViaAI(code);
             }
-            const byLevel = groupReps(result.reps || []);
-            if (Object.keys(byLevel).length === 0) {
-                setError(t.noneFound);
-                return;
-            }
-            const city = titleCaseCity(result.city);
-            if (!byLevel.Municipal?.length) {
-                byLevel.Municipal = [municipalFallbackRep(city, lang)];
-            }
-            setCityHint(city);
-            setGrouped(byLevel);
+            applyLookupResult(result);
         } catch (e) {
             setError(t.lookupFailed);
         } finally {
             setLoading(false);
             setSlowLookup(false);
         }
+    }
+
+    /* One-tap lookup: browser geolocation → Represent point query. No typing. */
+    function lookupByLocation() {
+        resetLookupState();
+        if (!navigator.geolocation) {
+            setError(t.geoUnavailable);
+            return;
+        }
+        setLocating(true);
+        navigator.geolocation.getCurrentPosition(
+            async (pos) => {
+                try {
+                    const point = `${pos.coords.latitude.toFixed(5)},${pos.coords.longitude.toFixed(5)}`;
+                    const res = await fetch(`https://represent.opennorth.ca/representatives/?point=${point}&limit=100`);
+                    if (!res.ok) throw new Error("geo-lookup-failed");
+                    const data = await res.json();
+                    let city = "";
+                    try {
+                        const bres = await fetch(`https://represent.opennorth.ca/boundaries/census-subdivisions/?contains=${point}`);
+                        if (bres.ok) city = (await bres.json()).objects?.[0]?.name || "";
+                    } catch (e) {
+                        /* city is a nicety — proceed without it */
+                    }
+                    setPostal("");
+                    applyLookupResult({ reps: data.objects || [], city });
+                } catch (e) {
+                    setError(t.lookupFailed);
+                } finally {
+                    setLocating(false);
+                }
+            },
+            (err) => {
+                setLocating(false);
+                setError(err.code === 1 ? t.geoDenied : t.geoUnavailable);
+            },
+            { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 },
+        );
     }
 
     async function generate() {
@@ -632,6 +743,8 @@ export default function CivicLetter() {
         .cl-card:hover { border-color: #14213D; }
         .cl-card:focus-visible { outline: 3px solid rgba(20,33,61,0.4); outline-offset: 2px; }
         .cl-card.sel { border-color: #C8102E; box-shadow: 0 0 0 2px rgba(200,16,46,0.25); }
+        .cl-card-all { border: 1.5px dashed #14213D; background: #FBFAF6; margin-bottom: 18px; }
+        .cl-card-all:hover { border-style: solid; }
         .cl-card .nm { font-weight: 600; font-size: 15px; color: #14213D; }
         .cl-card .of { font-size: 13px; color: #5B6272; margin-top: 2px; }
         .cl-card .noemail { font-size: 12px; color: #C8102E; margin-top: 2px; }
@@ -685,9 +798,13 @@ export default function CivicLetter() {
                             onKeyDown={(e) => e.key === "Enter" && !loading && lookup()}
                             aria-label={t.postalPlaceholder}
                         />
-                        <button className="cl-btn cl-btn-primary" onClick={lookup} disabled={loading}>
+                        <button className="cl-btn cl-btn-primary" onClick={lookup} disabled={loading || locating}>
                             {loading ? <Loader2 size={16} className="cl-spin" /> : <MapPin size={16} />}
                             {loading ? t.looking : t.lookup}
+                        </button>
+                        <button className="cl-btn cl-btn-ghost" onClick={lookupByLocation} disabled={loading || locating}>
+                            {locating ? <Loader2 size={16} className="cl-spin" /> : <LocateFixed size={16} />}
+                            {locating ? t.locating : t.useLocation}
                         </button>
                     </div>
                     {loading && slowLookup && (
@@ -703,6 +820,24 @@ export default function CivicLetter() {
                             <span className="cl-step-num">2</span>
                             <h2>{t.step2}</h2>
                         </div>
+                        {LEVEL_ORDER.flatMap((l) => grouped[l] || []).length > 1 && (
+                            <button
+                                className={"cl-card cl-card-all" + (selected?.level === "All" ? " sel" : "")}
+                                onClick={() => {
+                                    setSelected({ rep: collectiveRep(grouped, t), level: "All" });
+                                    setLetter(null);
+                                }}
+                            >
+                                <span>
+                                    <span className="nm">
+                                        <Mail size={15} style={{ verticalAlign: "-2px", marginRight: 7 }} />
+                                        {t.writeAll.replace("{n}", LEVEL_ORDER.flatMap((l) => grouped[l] || []).length)}
+                                    </span>
+                                    <div className="of">{t.writeAllSub}</div>
+                                </span>
+                                {selected?.level === "All" && <Check size={18} color="#C8102E" />}
+                            </button>
+                        )}
                         {LEVEL_ORDER.filter((lvl) => grouped[lvl]?.length).map((lvl) => (
                             <div className="cl-level" key={lvl}>
                                 <div className="cl-level-label">{LEVEL_LABELS[lvl][lang]}</div>
@@ -841,6 +976,14 @@ export default function CivicLetter() {
                         </div>
 
                         {letter.engine && <p className="cl-note">{t.draftedLocally.replace("{model}", letter.engine)}</p>}
+                        {selected.rep.collective && selected.rep.collective.some((r) => !r.email) && (
+                            <p className="cl-note">
+                                {t.collectiveNoEmail.replace(
+                                    "{names}",
+                                    selected.rep.collective.filter((r) => !r.email).map((r) => r.name).join(", "),
+                                )}
+                            </p>
+                        )}
                         {!selected.rep.email && <p className="cl-note">{t.noEmailNote}</p>}
                         {longBody && selected.rep.email && <p className="cl-note">{t.longNote}</p>}
                         <p className="cl-note">{t.multiLevelTip}</p>
